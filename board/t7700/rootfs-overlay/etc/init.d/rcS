@@ -1,0 +1,59 @@
+#!/bin/sh
+
+HOME=/root
+echo 0 > /sys/class/graphics/fbcon/cursor_blink
+sysctl -w kernel.printk="0 0 0 0" < /dev/null &>/dev/null
+lzopcat /root/logo.fb.lzo > /dev/fb0
+
+# Start all init scripts in /etc/init.d
+# executing them in numerical order.
+#
+for i in /etc/init.d/S??* ;do
+
+     # Ignore dangling symlinks (if any).
+     [ ! -f "$i" ] && continue
+
+     case "$i" in
+	*.sh)
+	    # Source shell script for speed.
+	    (
+		trap - INT QUIT TSTP
+		set start
+		. $i
+	    )
+	    ;;
+	*)
+	    # No sh extension, so fork subprocess.
+	    $i start < /dev/null &>/dev/null
+	    ;;
+    esac
+done
+
+# Waiting for touchscreen input device creation
+DEV_NUM=0
+while true
+do
+	LINE="$(grep -n "eGalax Inc. USB TouchController" /proc/bus/input/devices | grep -v "Pen" | cut -f1 -d:)"
+	if [ -z "$LINE" ]; then
+		echo "Device is not created yet" > /dev/kmsg;
+		sleep 0.5;
+		continue;
+	fi
+	EVENT="$(tail -n +${LINE} /proc/bus/input/devices | grep -m 1 "Handlers" | cut -f2 -d=)"
+	DEV_NAME="/dev/input/${EVENT}"
+	DEV_NUM="$(echo ${EVENT} | tr -dc '0-9')";
+
+	test -e ${DEV_NAME}
+        if [ $? -eq 0 ]; then
+                echo "Device created: ${DEV_NAME}" > /dev/kmsg;
+                break;
+        else
+                echo "Waiting for device";
+                sleep 0.5;
+        fi
+done
+
+sysctl -w kernel.shmmax=80000000 < /dev/null &>/dev/null
+
+#echo "Device number: ${DEV_NUM}" > /dev/kmsg;
+startx -- -layout Single${DEV_NUM} < /dev/null &>/dev/null &
